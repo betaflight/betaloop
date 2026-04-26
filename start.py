@@ -286,9 +286,6 @@ class Betaloop:
             sys.exit()
 
     def _start_video_receiver(self):
-        print("starting video receiver")
-        print(self.config.vidrecv_path)
-
         self._start_subprocess([self.config.vidrecv_path])
 
     def _start_msp_virtual_radio(self):
