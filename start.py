@@ -1,43 +1,38 @@
-import subprocess
-import sys
 import os
-import configparser
-import argparse
-import logging
-import signal
+import sys
 import time
-import typing
+import subprocess
+import argparse
+import configparser
+import signal
 import atexit
+import logging
+import typing
+from dataclasses import dataclass
 
 DEFAULT_CONFIG_FILE_NAME = "config.txt"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("betaloop")
+
+@dataclass
 class BetaloopConfig:
     """Config class used to store all of the Betaloop arguments
        after being parsed by BetaloopConfigParser"""
     
-    def __init__(
-        self,
-        aeroloop_path: str,
-        world_path: str,
-        betaflight_path: str,
-        virtual_radio_path: str=None,
-        vidrecv_path: str=None,
-        show_gazebo: bool=False,
-        disable_transmitter: bool=False
-    ):
-        self.aeroloop_gazebo = aeroloop_path
-        self.world_path = world_path
-        self.betaflight_path = betaflight_path
+    # core paths
+    aeroloop_path: str
+    world_path: str
+    betaflight_elf_path: str
 
-        # auxillary plugin paths            
-        self.virtual_radio_path = virtual_radio_path
-        self.vidrecv_path = vidrecv_path
+    # auxiliary paths
+    msp_virtual_radio_path: str
+    vidrecv_path: str
+    
+    # launch settings
+    show_gazebo: bool
+    disable_msp_virtual_radio: bool
 
-        # enable / disable options
-        self.show_gazebo = show_gazebo
-        self.disable_transmitter = disable_transmitter
 class ConfigField:
     """Configuration Field to hold information regarding each of the simulators
        arguments. Also used to enforce required arguments that are non-negotiable
@@ -115,10 +110,16 @@ class BoolConfigField(ConfigField):
         return err
     
     def get_from_section(self, section: configparser.SectionProxy):
-        return section.getboolean(self.file_key)
+        try:
+            return section.getboolean(self.file_key)
+        except ValueError as e:
+            # getboolean may return a value error if the provided value is not
+            # within the list of acceptable "boolean" values
+            return None
     
     def register_cli_argument(self, argparser: argparse.ArgumentParser):
         argparser.add_argument(self._get_cli_cmd_str(), action="store_true", default=None)
+
 class BetaloopConfigParser:
     """Configuration Parser class used for coalescing config input from both config file
        (if it exists) and/or from the cli arguments passed when running the python script
@@ -139,7 +140,7 @@ class BetaloopConfigParser:
             PathConfigField("vidrecv", False, "VidRecv", "vidrecv"),
 
             # optional boolean fields
-            BoolConfigField("show_gazebo", False, "RunHeadless", "gazebo"),
+            BoolConfigField("show_gazebo", False, "ShowGazebo", "gazebo"),
             BoolConfigField("disable_transmitter", False, "DisableTransmitter", "disable_transmitter")
         ]
 
@@ -201,6 +202,9 @@ class BetaloopConfigParser:
             
             # world value is the only field that is specfically a filename and is dependent on
             # gazebo_assets
+
+            # note: don't want to break existing configs so this functionality is here
+            
             if field.name == "world_file":
                 value = os.path.join(config_values["aeroloop_gazebo"], "worlds", value)
             
@@ -215,13 +219,13 @@ class BetaloopConfigParser:
             config_values[field.name] = value
                     
         return BetaloopConfig(
-            aeroloop_path=config_values["aeroloop_gazebo"],
-            world_path=config_values["world_file"],
-            betaflight_path=config_values["betaflight_elf"],
-            virtual_radio_path=config_values["transmitter"],
-            vidrecv_path=config_values["vidrecv"],
-            show_gazebo=config_values["show_gazebo"],
-            disable_transmitter=config_values["disable_transmitter"]
+            config_values["aeroloop_gazebo"],
+            config_values["world_file"],
+            config_values["betaflight_elf"],
+            config_values["transmitter"],
+            config_values["vidrecv"],
+            config_values["show_gazebo"],
+            config_values["disable_transmitter"]
         )
 
 class Betaloop:
@@ -248,9 +252,11 @@ class Betaloop:
         os.environ["GZ_SIM_RESOURCE_PATH"] = "/usr/share/gz/gz-sim8" + os.pathsep + gz_resource
         os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + gz_plugins
         os.environ["SDF_PATH"] = "/usr/share/gz/gz-sim8/models" + os.pathsep + gz_models
+
+        # this will fail on arm systems?
         os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + ld_lib_path
 
-        # Now load assets
+        # load assets
         models = os.path.join(self.config.aeroloop_gazebo, "models")
         plugins = os.path.join(self.config.aeroloop_gazebo, "plugins", "build")
         worlds = os.path.join(self.config.aeroloop_gazebo, "worlds")
@@ -297,59 +303,59 @@ class Betaloop:
     
     # Betaloop subprocess startup
 
-    def _start_gazebo(self, run_headless: bool):
+    def _start_gazebo(self):
         args = ["gz", "sim"]
 
-        if run_headless:
-            args.append("-s")  # Server only (headless)
+        if not self.config.show_gazebo:
+            args.append("-s") # run in headless mode
 
         args.extend(["-r", "-v", "4", self.config.world_path])
 
         self._start_subprocess(args)
+
+        # TODO: add a check to see if gazebo is actually ready somehow
         time.sleep(5)
 
     def _start_betaflight(self):
-        dir_path = os.path.dirname(self.config.betaflight_path)
-        self._start_subprocess([self.config.betaflight_path], cwd=dir_path)
+        dir_path = os.path.dirname(self.config.betaflight_elf_path)
+        self._start_subprocess([self.config.betaflight_elf_path], cwd=dir_path)
         time.sleep(3)
 
     def _start_video_receiver(self):
         self._start_subprocess([self.config.vidrecv_path])
 
     def _start_msp_virtual_radio(self):
-        self._start_subprocess(["node", self.config.virtual_radio_path])
+        self._start_subprocess(["node", self.config.msp_virtual_radio_path])
 
     def _start_websockify(self):
         """websockify is used to proxy in between the betaflight configurator
         websocket and the TCP socket from betaflight SITL"""
 
-        subprocess.run(["fuser", "-k", "6761/tcp"], capture_output=True)
         self._start_subprocess(["websockify", "localhost:6761", "localhost:5761"])
 
     def start(self):        
         try:
             # Block until connected
-            logger.info("Starting Gazebo world...")
+            logger.info("starting gazebo")
+            self._start_gazebo()
 
-            run_headless = not self.config.show_gazebo
-            self._start_gazebo(run_headless)
-
-            logger.info("Starting websockify between localhost:6761 and localhost:5761")
+            # start websockify
+            logger.info("starting websockify proxy")
             self._start_websockify()
 
             # starting betaflight SITL
-            logger.info("Starting Betaflight SITL at {}.".format(self.config.betaflight_path))
+            logger.info("starting Betaflight SITL at {}.".format(self.config.betaflight_elf_path))
             self._start_betaflight()
 
             # startup MSP virtual radio if possible
-            disable_transmitter = self.config.disable_transmitter or \
-                                self.config.virtual_radio_path is None
+            disable_transmitter = self.config.disable_msp_virtual_radio or \
+                                self.config.msp_virtual_radio_path is None
             if not disable_transmitter:
-                logger.info("Starting the transmitter...")
+                logger.info("starting msp_virtual_radio")
                 self._start_msp_virtual_radio()
             
             if self.config.vidrecv_path is not None:
-                logger.info("Starting video receiver {}".format(self.config.vidrecv_path))
+                logger.info("starting video receiver {}".format(self.config.vidrecv_path))
                 self._start_video_receiver()
         except Exception as e:
             logger.error(f"startup failed with {e}")
@@ -368,16 +374,15 @@ def start_betaloop():
     result = config_parser.parse()
 
     if result is None:
-        logger.error("Betaloop startup failure: one or more required fields missing or invalid")
-    else:
-        logger.info("configuration successfully parsed, starting betaloop")
+        logger.error("config failed, one or more required fields missing or invalid")
+        sys.exit(1)
 
-        betaloop_config = result
-        betaloop = Betaloop(betaloop_config)
+    logger.info("configuration successfully parsed, starting betaloop")
 
-        betaloop.start()
+    betaloop_config = result
+    betaloop = Betaloop(betaloop_config)
 
-        sys.exit(0)
+    betaloop.start()
 
 if __name__ == "__main__":
     start_betaloop()
