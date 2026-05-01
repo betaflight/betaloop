@@ -15,6 +15,9 @@ DEFAULT_CONFIG_FILE_NAME = "config.txt"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("betaloop")
 
+def system_is_macos():
+    return sys.platform == "darwin"
+
 @dataclass
 class BetaloopConfig:
     """Config class used to store all of the Betaloop arguments
@@ -131,7 +134,7 @@ class BetaloopConfigParser:
 
         self._fields: typing.List[ConfigField]  = [
             # required fields
-            PathConfigField("aeroloop_gazebo", True, "AeroloopGazeboHome", "gazebo_assets"),
+            PathConfigField("aeroloop_path", True, "AeroloopGazeboHome", "gazebo_assets"),
             PathConfigField("world_file", True, "World", "world"),
             PathConfigField("betaflight_elf", True, "BetaflightElf", "elf"),
 
@@ -206,7 +209,7 @@ class BetaloopConfigParser:
             # note: don't want to break existing configs so this functionality is here
             
             if field.name == "world_file":
-                value = os.path.join(config_values["aeroloop_gazebo"], "worlds", value)
+                value = os.path.join(config_values["aeroloop_path"], "worlds", value)
             
             if value is not None:
                 if not field.validate(value):
@@ -219,7 +222,7 @@ class BetaloopConfigParser:
             config_values[field.name] = value
                     
         return BetaloopConfig(
-            config_values["aeroloop_gazebo"],
+            config_values["aeroloop_path"],
             config_values["world_file"],
             config_values["betaflight_elf"],
             config_values["transmitter"],
@@ -257,9 +260,9 @@ class Betaloop:
         os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + ld_lib_path
 
         # load assets
-        models = os.path.join(self.config.aeroloop_gazebo, "models")
-        plugins = os.path.join(self.config.aeroloop_gazebo, "plugins", "build")
-        worlds = os.path.join(self.config.aeroloop_gazebo, "worlds")
+        models = os.path.join(self.config.aeroloop_path, "models")
+        plugins = os.path.join(self.config.aeroloop_path, "plugins", "build")
+        worlds = os.path.join(self.config.aeroloop_path, "worlds")
 
         os.environ["SDF_PATH"] += os.pathsep + models
         os.environ["GZ_SIM_RESOURCE_PATH"] += os.pathsep + worlds
@@ -304,16 +307,30 @@ class Betaloop:
     # Betaloop subprocess startup
 
     def _start_gazebo(self):
-        args = ["gz", "sim"]
+        args_base = ["gz", "sim"]
 
-        if not self.config.show_gazebo:
-            args.append("-s") # run in headless mode
+        # start the server (default behavior)
+        if system_is_macos():
+            # run the gazebo server
+            args_server = args_base + ["-s", "-r", "-v", "4", self.config.world_path]
+            self._start_subprocess(args_server)
 
-        args.extend(["-r", "-v", "4", self.config.world_path])
+            time.sleep(2)
 
-        self._start_subprocess(args)
+            # start the UI if necessary
+            if self.config.show_gazebo:
+                args_gui = args_base + ["-g"]
+                self._start_subprocess(args_gui)
+        else:
+            args_gz = args_base.copy()
 
-        # TODO: add a check to see if gazebo is actually ready somehow
+            if not self.config.show_gazebo:
+                args_gz.append("-s")
+
+            args_gz += ["-r", "-v", "4", self.config.world_path]
+
+            self._start_subprocess(args_gz)
+
         time.sleep(5)
 
     def _start_betaflight(self):

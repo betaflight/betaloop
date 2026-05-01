@@ -1,13 +1,27 @@
 # Betaloop
 
-Betaloop is a flight simulator with the  goal of providing accurate
-and realistic flight performance primarily to be used in hardware/software in the loop testing for UAVs. This specific
-implementation is for testing the
-[Betaflight](https://github.com/betaflight/betaflight) flight controller in
-[Gazebo](http://gazebosim.org/). 
-![Betaloop](https://raw.githubusercontent.com/Aeroloop/betaloop/master/images/screenshot.png)
+Betaloop is a simulation launcher that creates an environment for evaluation of the Betaflight SITL target. Betaloop uses Gazebo Harmonic as the physics simulation environment which is used to provide sensor data to the Betaflight SITL instance which is created by this launcher as well.
 
-collection of programs and scripts with the
+# Prerequisites
+
+* git
+* python 3.7+
+* CMake 3.10.2+
+* Gazebo Harmonic
+* betaflight cloned locally
+
+# Setup Guide
+
+This setup guide 
+
+1. clone this repository `git clone https://github.com/betaflight/betaloop`
+2. 
+
+
+
+// TODO : add cross platform note
+// TODO : add dependencies notes
+
 # Features
 
 1. Uses real flight control firmware (Betaflight)  
@@ -15,6 +29,8 @@ collection of programs and scripts with the
 3. Use your own radio controller!  
 
 # Requirements
+
+
 
 1. Gazebo 8 
 2. [Aeroloop Gazebo resources](https://github.com/Aeroloop/aeroloop_gazebo)
@@ -39,20 +55,3 @@ python3 start.py
 When Betaflight is started a .bin is created and the configuration settings are
 saved here. This is saved in the *current* directory. Be careful as this can
 currently cause a .bin to be overwritten if testing multiple builds.
-
-# Motor Mapping
-This will be changed in the future so they match however current mappings are,
-
-Gazebo 
-
-Rotor 0 = Front Right
-Rotor 1 = Back Left
-Rotor 2 = Front Left
-Rotor 3 = Back Right
-
-Standard BF Mixer
-
-Rotor 0 = Back Right
-Rotor 1 = Front Right
-Rotor 2 = Back Left
-Rotor 3 = Front Left
