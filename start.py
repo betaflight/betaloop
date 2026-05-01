@@ -6,17 +6,17 @@ import argparse
 import configparser
 import signal
 import atexit
-import logging
 import typing
+
 from dataclasses import dataclass
 
 DEFAULT_CONFIG_FILE_NAME = "config.txt"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("betaloop")
-
 def system_is_macos():
     return sys.platform == "darwin"
+
+def betaloop_log(msg: str):
+    print(f"[BETALOOP] {msg}")
 
 @dataclass
 class BetaloopConfig:
@@ -168,10 +168,10 @@ class BetaloopConfigParser:
     
         if self._config_file_exists:
             if "Betaloop" not in self._config_file_parser:
-                err = "[Betaloop] section missing from config.txt\n" \
+                err = "section missing from config.txt\n" \
                         "-> format of config.txt is expected to be\n" \
                         "[Betaloop]\n..."
-                logger.error(err)
+                betaloop_log(err)
                 return None
             
             config_section = self._config_file_parser["Betaloop"]
@@ -194,13 +194,12 @@ class BetaloopConfigParser:
                     if value is None:
                         # log error that the value could not be found in the file
                         err_msg = field.file_required_value_missing_error(self._config_file_name)
-                        logger.error(err_msg)
+                        betaloop_log(err_msg)
                         return None
                 
             elif field.required:
                 # required field that wasn't found in CLI or the config file
-
-                logger.error(f"required field {field.name} missing")
+                betaloop_log(f"required field {field.name} missing")
                 return None
             
             # world value is the only field that is specfically a filename and is dependent on
@@ -214,9 +213,9 @@ class BetaloopConfigParser:
             if value is not None:
                 if not field.validate(value):
                     if value_from_cli:
-                        logger.error(field.cli_value_invalid_error(value))
+                        betaloop_log(field.cli_value_invalid_error(value))
                     else:
-                        logger.error(field.file_value_invalid_error(value))
+                        betaloop_log(field.file_value_invalid_error(value))
                     return None
             
             config_values[field.name] = value
@@ -353,29 +352,25 @@ class Betaloop:
     def start(self):        
         try:
             # Block until connected
-            logger.info("starting gazebo")
+            betaloop_log("starting gazebo")
             self._start_gazebo()
 
             # start websockify
-            logger.info("starting websockify proxy")
+            betaloop_log("starting websockify proxy")
             self._start_websockify()
 
             # starting betaflight SITL
-            logger.info("starting Betaflight SITL at {}.".format(self.config.betaflight_elf_path))
+            betaloop_log("starting Betaflight SITL at {}.".format(self.config.betaflight_elf_path))
             self._start_betaflight()
 
             # startup MSP virtual radio if possible
             disable_transmitter = self.config.disable_msp_virtual_radio or \
                                 self.config.msp_virtual_radio_path is None
             if not disable_transmitter:
-                logger.info("starting msp_virtual_radio")
+                betaloop_log("starting msp_virtual_radio")
                 self._start_msp_virtual_radio()
-            
-            if self.config.vidrecv_path is not None:
-                logger.info("starting video receiver {}".format(self.config.vidrecv_path))
-                self._start_video_receiver()
         except Exception as e:
-            logger.error(f"startup failed with {e}")
+            betaloop_log(f"startup failed with {e}")
             self._kill_subprocesses()
             sys.exit(1)
 
@@ -391,10 +386,10 @@ def start_betaloop():
     result = config_parser.parse()
 
     if result is None:
-        logger.error("config failed, one or more required fields missing or invalid")
+        betaloop_log("config failed, one or more required fields missing or invalid")
         sys.exit(1)
 
-    logger.info("configuration successfully parsed, starting betaloop")
+    betaloop_log("config success, starting")
 
     betaloop_config = result
     betaloop = Betaloop(betaloop_config)
