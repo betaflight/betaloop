@@ -30,11 +30,10 @@ class BetaloopConfig:
 
     # auxiliary paths
     msp_virtual_radio_path: str
-    vidrecv_path: str
     
     # launch settings
-    show_gazebo: bool
-    disable_msp_virtual_radio: bool
+    show_gazebo: typing.Optional[bool]
+    disable_msp_virtual_radio: typing.Optional[bool]
 
 class ConfigField:
     """Configuration Field to hold information regarding each of the simulators
@@ -140,7 +139,6 @@ class BetaloopConfigParser:
 
             # optional path fields
             PathConfigField("transmitter", False, "MspVirtualRadioHome", "transmitter"),
-            PathConfigField("vidrecv", False, "VidRecv", "vidrecv"),
 
             # optional boolean fields
             BoolConfigField("show_gazebo", False, "ShowGazebo", "gazebo"),
@@ -225,7 +223,6 @@ class BetaloopConfigParser:
             config_values["world_file"],
             config_values["betaflight_elf"],
             config_values["transmitter"],
-            config_values["vidrecv"],
             config_values["show_gazebo"],
             config_values["disable_transmitter"]
         )
@@ -236,36 +233,27 @@ class Betaloop:
     def __init__(self, config: BetaloopConfig):
         self.config = config
         self.process_handles: typing.List[subprocess.Popen] = []
+        self.shutdown_started = False
 
         atexit.register(self._kill_subprocesses)
         signal.signal(signal.SIGTERM, self._kill_subprocesses)
         signal.signal(signal.SIGINT, self._kill_subprocesses)
 
-        self._setup_env()
+    def _append_to_env(self, env_key: str, value: str):
+        env = os.environ.get(env_key, "")
+        if not env:
+            os.environ[env_key] = value
+        else:
+            os.environ[env_key] += os.pathsep + value
 
     def _setup_env(self): 
-        """set up the environment variables for gazebo, some of these are system dependent"""
+        models_dir = os.path.join(self.config.aeroloop_path, "models")
+        worlds_dir = os.path.join(self.config.aeroloop_path, "worlds")
+        plugins_dir = os.path.join(self.config.aeroloop_path, "plugins", "build")
 
-        ld_lib_path = os.environ.get("LD_LIBRARY_PATH", "")
-        gz_resource = os.environ.get("GZ_SIM_RESOURCE_PATH", "")
-        gz_plugins = os.environ.get("GZ_SIM_SYSTEM_PLUGIN_PATH", "")
-        gz_models = os.environ.get("SDF_PATH", "")
-
-        os.environ["GZ_SIM_RESOURCE_PATH"] = "/usr/share/gz/gz-sim8" + os.pathsep + gz_resource
-        os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + gz_plugins
-        os.environ["SDF_PATH"] = "/usr/share/gz/gz-sim8/models" + os.pathsep + gz_models
-
-        # this will fail on arm systems?
-        os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + ld_lib_path
-
-        # load assets
-        models = os.path.join(self.config.aeroloop_path, "models")
-        plugins = os.path.join(self.config.aeroloop_path, "plugins", "build")
-        worlds = os.path.join(self.config.aeroloop_path, "worlds")
-
-        os.environ["SDF_PATH"] += os.pathsep + models
-        os.environ["GZ_SIM_RESOURCE_PATH"] += os.pathsep + worlds
-        os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] += os.pathsep + plugins
+        self._append_to_env("SDF_PATH", models_dir)
+        self._append_to_env("GZ_SIM_RESOURCE_PATH", worlds_dir)
+        self._append_to_env("GZ_SIM_SYSTEM_PLUGIN_PATH", plugins_dir)
 
     # subprocess management
 
@@ -281,26 +269,29 @@ class Betaloop:
         self.process_handles.append(proc)
 
     def _kill_subprocesses(self, sig=None, frame=None):
-        for proc in self.process_handles:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                pass  # already dead
+        if not self.shutdown_started:
+            self.shutdown_started = True
+            
+            for proc in self.process_handles:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass  # already dead
 
-        deadline = time.time() + 5
-        alive = list(self.process_handles)
-        while alive and time.time() < deadline:
-            alive = [p for p in alive if p.poll() is None]
-            time.sleep(0.1)
+            deadline = time.time() + 5
+            alive = list(self.process_handles)
+            while alive and time.time() < deadline:
+                alive = [p for p in alive if p.poll() is None]
+                time.sleep(0.1)
 
-        for proc in alive:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except ProcessLookupError:
-                pass  # already dead
+            for proc in alive:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # already dead
 
-        if sig is not None:
-            sys.exit(0)
+            if sig is not None:
+                sys.exit(0)
             
     
     # Betaloop subprocess startup
@@ -314,10 +305,8 @@ class Betaloop:
             args_server = args_base + ["-s", "-r", "-v", "4", self.config.world_path]
             self._start_subprocess(args_server)
 
-            time.sleep(2)
-
-            # start the UI if necessary
             if self.config.show_gazebo:
+                # start viewport
                 args_gui = args_base + ["-g"]
                 self._start_subprocess(args_gui)
         else:
@@ -327,7 +316,6 @@ class Betaloop:
                 args_gz.append("-s")
 
             args_gz += ["-r", "-v", "4", self.config.world_path]
-
             self._start_subprocess(args_gz)
 
         time.sleep(5)
@@ -337,9 +325,6 @@ class Betaloop:
         self._start_subprocess([self.config.betaflight_elf_path], cwd=dir_path)
         time.sleep(3)
 
-    def _start_video_receiver(self):
-        self._start_subprocess([self.config.vidrecv_path])
-
     def _start_msp_virtual_radio(self):
         self._start_subprocess(["node", self.config.msp_virtual_radio_path])
 
@@ -348,8 +333,42 @@ class Betaloop:
         websocket and the TCP socket from betaflight SITL"""
 
         self._start_subprocess(["websockify", "localhost:6761", "localhost:5761"])
+    
+    def _verify_gazebo_plugin(self):
+        # ensure that the aeroloop gazebo plugin is built
+        plugin_dir = os.path.join(self.config.aeroloop_path, "plugins")
+        build_dir = os.path.join(plugin_dir, "build")
 
-    def start(self):        
+        if not os.path.exists(build_dir):
+            betaloop_log("startup failed, aeroloop_gazebo not built")
+            return False
+        
+        
+        return True
+    
+    def _verify_msp_virtual_radio(self):
+        # check that path to mspvirtualradio is correct
+        virtual_radio_path = self.config.msp_virtual_radio_path
+        emu_radio_filename = "emu-dx6-msp.js"
+
+        if not virtual_radio_path.endswith(emu_radio_filename):
+            betaloop_log(f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_radio_filename}")
+            return False
+        
+        return True
+
+    def start(self):
+        if not self._verify_gazebo_plugin():
+            sys.exit(1)
+        # verify virtual radio
+        disable_transmitter = self.config.disable_msp_virtual_radio or \
+                            self.config.msp_virtual_radio_path is None
+        if not disable_transmitter:
+            if not self._verify_msp_virtual_radio():
+                sys.exit(1)
+
+        self._setup_env()
+               
         try:
             # Block until connected
             betaloop_log("starting gazebo")
@@ -360,13 +379,11 @@ class Betaloop:
             self._start_websockify()
 
             # starting betaflight SITL
-            betaloop_log("starting Betaflight SITL at {}.".format(self.config.betaflight_elf_path))
+            betaloop_log(f"starting Betaflight SITL at {self.config.betaflight_elf_path}")
             self._start_betaflight()
 
-            # startup MSP virtual radio if possible
-            disable_transmitter = self.config.disable_msp_virtual_radio or \
-                                self.config.msp_virtual_radio_path is None
             if not disable_transmitter:
+                # startup MSP virtual radio
                 betaloop_log("starting msp_virtual_radio")
                 self._start_msp_virtual_radio()
         except Exception as e:
