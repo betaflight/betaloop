@@ -14,6 +14,7 @@ use an RC transmitter with a USB Joystick to control the simulated drone through
 * CMake 3.10.2+
 * Gazebo Harmonic
 * Betaflight cloned locally + required build toolchain
+* websockify (install `pip install websockify`)
 * Aeroloop cloned locally (https://github.com/betaflight/aeroloop_gazebo/tree/gz)
 
 ## Setup Guide
