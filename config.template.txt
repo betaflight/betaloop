@@ -1,0 +1,4 @@
+[Betaloop]
+AeroloopGazeboHome=
+World=
+BetaflightElf=

@@ -1,58 +1,66 @@
 # Betaloop
 
-Betaloop is a flight simulator with the  goal of providing accurate
-and realistic flight performance primarily to be used in hardware/software in the loop testing for UAVs. This specific
-implementation is for testing the
-[Betaflight](https://github.com/betaflight/betaflight) flight controller in
-[Gazebo](http://gazebosim.org/). 
-![Betaloop](https://raw.githubusercontent.com/Aeroloop/betaloop/master/images/screenshot.png)
+Betaloop is a simulation launcher that creates an environment for evaluation of the Betaflight SITL target
 
-collection of programs and scripts with the
-# Features
+## Simulation Environment
 
-1. Uses real flight control firmware (Betaflight)  
-2. Supports first person view (FPV) flight
-3. Use your own radio controller!  
+The simulated environment runs in Gazebo Harmonic and interfaces with Betaflight SITL through the aeroloop gazebo plugin. Additionally this launcher provides the ability to
+use an RC transmitter with a USB Joystick to control the simulated drone through an additional plugin.
 
-# Requirements
+## Prerequisites
 
-1. Gazebo 8 
-2. [Aeroloop Gazebo resources](https://github.com/Aeroloop/aeroloop_gazebo)
-2. [Betaflight](https://github.com/betaflight/betaflight) [compiled for
-   SITL](https://github.com/betaflight/betaflight/tree/master/src/main/target/SITL)
-3. Python3
-4. [VidRecv](https://github.com/Aeroloop/vidrecv)
-5. [MSP virtual radio](https://github.com/Aeroloop/msp_virtualradio) 
+* git
+* python 3.7+
+* CMake 3.10.2+
+* Gazebo Harmonic
+* Betaflight cloned locally + required build toolchain
+* websockify (install `pip install websockify`)
+* Aeroloop cloned locally (https://github.com/betaflight/aeroloop_gazebo/tree/gz)
 
-# Instructions
-For required software part of Aeroloop make sure to follow the install
-instructions specified by their respective README file.
-For ease of use, add your arguments to config.txt, if needed these can be
-overridden by command line arguments. 
+## Setup Guide
 
-Run the script to start the simulator,
-```
-python3 start.py
-```
+* build Betaflight SITL target
+* build Aeroloop using `aeroloop_gazebo/build_plugin.sh`
 
-# Notes
-When Betaflight is started a .bin is created and the configuration settings are
-saved here. This is saved in the *current* directory. Be careful as this can
-currently cause a .bin to be overwritten if testing multiple builds.
+## Optional Setup
 
-# Motor Mapping
-This will be changed in the future so they match however current mappings are,
+* MSP Virtual Radio (https://github.com/Aeroloop/msp_virtualradio)
 
-Gazebo 
+   MSP Virtual Radio can be used to provide joystick input to the simulated drone.
+   Compatibility with it has been maintained in the current version of Betaloop to maintain parity with existing setups. Given that active development has seemed to cease on the project a plugin `betaloop_joystick` is planned to succeed it
 
-Rotor 0 = Front Right
-Rotor 1 = Back Left
-Rotor 2 = Front Left
-Rotor 3 = Back Right
+## Usage
 
-Standard BF Mixer
+Betaloop can be configured through a combination of either a configuration file or CLI arguments provided when running `start.py`. Fields provided as CLI arguments override their counterparts in the configuration file.
 
-Rotor 0 = Back Right
-Rotor 1 = Front Right
-Rotor 2 = Back Left
-Rotor 3 = Front Left
+config file should follow the format provided in `config.template.txt` and be named `config.txt`
+
+### Required Config
+
+   * Path to aeroloop_gazebo
+      * CLI : `--gazebo_assets /path/to/aeroloop_gazebo`
+      * Config : `AeroloopGazeboHome=/path/to/aeroloop_gazebo`
+   
+   * World file name
+      * specify the base filename of the Gazebo world (found in the aeroloop_gazebo worlds directory) to load that world; future releases may accept external world files.
+
+      * CLI : `--world world.sdf`
+      * Config : `World=world.sdf`
+   
+   * Path to Betaflight SITL elf
+      * CLI : `--elf /path/to/betaflightelf`
+      * Config : `BetaflightElf=/path/to/betaflightelf`
+   
+### Optional Config
+
+   * Path to MSP Virtual Radio
+      * CLI : `--transmitter /path/to/mspvirtualradio`
+      * Config : `MSPVirtualRadioHome=/path/to/mspvirtualradio`
+   
+   * Option to enable Gazebo GUI
+      * CLI : `--gazebo`
+      * Config : `ShowGazebo=true` or `ShowGazebo=false`
+   
+   * Option to disable transmitter input
+      * CLI : `--disable-transmitter`
+      * Config : `DisableTransmitter=true` or `DisableTransmitter=false`

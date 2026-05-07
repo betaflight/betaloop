@@ -1,247 +1,417 @@
-import subprocess
-import sys
 import os
-import configparser
-import argparse
-import logging
-import signal
-
-
+import sys
 import time
+import subprocess
+import argparse
+import configparser
+import signal
+import atexit
+import typing
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("betaloop")
+from dataclasses import dataclass
+
+DEFAULT_CONFIG_FILE_NAME = "config.txt"
+
+def system_is_macos():
+    return sys.platform == "darwin"
+
+def betaloop_log(msg: str):
+    print(f"[BETALOOP] {msg}")
+
+@dataclass
+class BetaloopConfig:
+    """Config class used to store all of the Betaloop arguments
+       after being parsed by BetaloopConfigParser"""
+    
+    # core paths
+    aeroloop_path: str
+    world_path: str
+    betaflight_elf_path: str
+
+    # auxiliary paths
+    msp_virtual_radio_path: str
+    
+    # launch settings
+    show_gazebo: typing.Optional[bool]
+    disable_msp_virtual_radio: typing.Optional[bool]
+
+class ConfigField:
+    """Configuration Field to hold information regarding each of the simulators
+       arguments. Also used to enforce required arguments that are non-negotiable
+       paths / values that are needed to setup the simulation environment"""
+    
+    def __init__(self, name: str, required: bool, file_key: str, cli_key: str):
+        self.name = name
+        self.required = required
+        self.file_key = file_key
+        self.cli_key = cli_key
+
+    def validate(self, value) -> bool: raise NotImplementedError()
+    def cli_value_invalid_error(self, value): raise NotImplementedError()
+    def file_required_value_missing_error(self, filename: str): raise NotImplementedError()
+    def file_value_invalid_error(self, value): raise NotImplementedError()
+    def get_from_section(self, section: configparser.SectionProxy): raise NotImplementedError()
+    def register_cli_argument(self, argparser: argparse.ArgumentParser): raise NotImplementedError()
+
+    def _get_cli_cmd_str(self) -> str:
+        return "--" + self.cli_key.replace("_", "-")
+
+class PathConfigField(ConfigField):
+    """Configuration Field for defining a path to some resource"""
+
+    def validate(self, value) -> bool:
+        if value is None:
+            return False
+        if not isinstance(value, str):
+            return False
+        return os.path.exists(value)
+    
+    def cli_value_invalid_error(self, value):
+        err = f"provided value for {self.cli_key} invalid\n" \
+              f"-> path: {value} does not exist"
+        return err
+    
+    def file_required_value_missing_error(self, filename: str):
+        err = f"required field {self.file_key} missing from ({filename})\n" \
+              f"-> please add the missing field as {self.file_key}=/path/to/{self.name}"
+        return err
+    
+    def file_value_invalid_error(self, value):
+        err = f"provided value for {self.file_key} invalid\n" \
+              f"-> path {value} does not exist"
+        return err
+    
+    def get_from_section(self, section: configparser.SectionProxy):
+        return section.get(self.file_key)
+
+    def register_cli_argument(self, argparser: argparse.ArgumentParser):
+        argparser.add_argument(self._get_cli_cmd_str(), type=str)
+        
+class BoolConfigField(ConfigField):
+    """Configuation Field for enabling disabling specific behaviors
+        i.e. if Gazebo UI runs headless"""
+    
+    def validate(self, value):
+        if value is None:
+            return False
+        return isinstance(value, bool)
+    
+    def cli_value_invalid_error(self, value):
+        err = f"provided value for {self.cli_key} invalid, value must be a boolean"
+        return err
+    
+    def file_required_value_missing_error(self, filename: str):
+        err = f"required field {self.file_key} missing from {filename}\n" \
+              f"-> please add the missing field as:\n" \
+              f"   {self.file_key}=True or {self.file_key}=False depending on desired behavior"
+        return err
+    
+    def file_value_invalid_error(self, value):
+        err = f"provided value for {self.file_key} invalid\n" \
+                "-> value must be a boolean (true or false)"
+        return err
+    
+    def get_from_section(self, section: configparser.SectionProxy):
+        try:
+            return section.getboolean(self.file_key)
+        except ValueError as e:
+            # getboolean may return a value error if the provided value is not
+            # within the list of acceptable "boolean" values
+            return None
+    
+    def register_cli_argument(self, argparser: argparse.ArgumentParser):
+        argparser.add_argument(self._get_cli_cmd_str(), action="store_true", default=None)
+
+class BetaloopConfigParser:
+    """Configuration Parser class used for coalescing config input from both config file
+       (if it exists) and/or from the cli arguments passed when running the python script
+       additionally in the case of misconfigurations it provides user with hints 
+       to help them resolve the issue"""
+    
+    def __init__(self, fpath: str):
+        # store list of configuration fields
+
+        self._fields: typing.List[ConfigField]  = [
+            # required fields
+            PathConfigField("aeroloop_path", True, "AeroloopGazeboHome", "gazebo_assets"),
+            PathConfigField("world_file", True, "World", "world"),
+            PathConfigField("betaflight_elf", True, "BetaflightElf", "elf"),
+
+            # optional path fields
+            PathConfigField("transmitter", False, "MspVirtualRadioHome", "transmitter"),
+
+            # optional boolean fields
+            BoolConfigField("show_gazebo", False, "ShowGazebo", "gazebo"),
+            BoolConfigField("disable_transmitter", False, "DisableTransmitter", "disable_transmitter")
+        ]
+
+        self._config_file_name = os.path.basename(fpath)
+        self._config_file_exists = os.path.exists(fpath)
+
+        if self._config_file_exists:
+            self._config_file_parser = configparser.ConfigParser()
+            self._config_file_parser.read(fpath)
+
+        # setup CLI 
+
+        self._config_cli_parser = argparse.ArgumentParser("Betaloop")
+
+        for field in self._fields:
+            field.register_cli_argument(self._config_cli_parser)
+
+        self._config_cli_args = self._config_cli_parser.parse_args()
+
+    def parse(self):
+        config_values = {}
+    
+        if self._config_file_exists:
+            if "Betaloop" not in self._config_file_parser:
+                err = "section missing from config.txt\n" \
+                        "-> format of config.txt is expected to be\n" \
+                        "[Betaloop]\n..."
+                betaloop_log(err)
+                return None
+            
+            config_section = self._config_file_parser["Betaloop"]
+        else:
+            config_section = None
+
+        # config validation
+        for field in self._fields:
+            value_from_cli = False
+            value = getattr(self._config_cli_args, field.cli_key)
+
+            if value is not None:
+                # value sourced from CLI
+                value_from_cli = True
+
+            elif config_section is not None:
+                # try to source value from config file
+                value = field.get_from_section(config_section)
+                if field.required:
+                    if value is None:
+                        # log error that the value could not be found in the file
+                        err_msg = field.file_required_value_missing_error(self._config_file_name)
+                        betaloop_log(err_msg)
+                        return None
+                
+            elif field.required:
+                # required field that wasn't found in CLI or the config file
+                betaloop_log(f"required field {field.name} missing")
+                return None
+            
+            # world value is the only field that is specfically a filename and is dependent on
+            # gazebo_assets
+
+            # note: don't want to break existing configs so this functionality is here
+            
+            if field.name == "world_file":
+                value = os.path.join(config_values["aeroloop_path"], "worlds", value)
+            
+            if value is not None:
+                if not field.validate(value):
+                    if value_from_cli:
+                        betaloop_log(field.cli_value_invalid_error(value))
+                    else:
+                        betaloop_log(field.file_value_invalid_error(value))
+                    return None
+            
+            config_values[field.name] = value
+                    
+        return BetaloopConfig(
+            config_values["aeroloop_path"],
+            config_values["world_file"],
+            config_values["betaflight_elf"],
+            config_values["transmitter"],
+            config_values["show_gazebo"],
+            config_values["disable_transmitter"]
+        )
 
 class Betaloop:
-    def __init__(self, gazebo_assets, default_world, elf, transmitter, vidrecv, show_gzclient):
-        self.host = "localhost"
-        self.gz_port = 11345
-        self.gz_assets = gazebo_assets
-        self.default_world = default_world
-        self.elf = elf
-        self.transmitter = transmitter
-        self.vidrecv = vidrecv
-        self.show_gzclient = show_gzclient
+    """Core Betaloop launcher class which starts the simulated environment"""
 
-        signal.signal(signal.SIGINT, self._shutdown)
-        self.pids = []
+    def __init__(self, config: BetaloopConfig):
+        self.config = config
+        self.process_handles: typing.List[subprocess.Popen] = []
+        self.shutdown_started = False
 
-        self.load_gazebo_vars()
+        atexit.register(self._kill_subprocesses)
+        signal.signal(signal.SIGTERM, self._kill_subprocesses)
+        signal.signal(signal.SIGINT, self._kill_subprocesses)
 
-    def _get_env_var(self, name):
-        """ Get an environment variable if it exists 
-        
-        Args:
-            name (string): variable to get
-        """
-        # Copied from https://github.com/wil3/gymfc/blob/master/gymfc/envs/gazebo_env.py
-        return os.environ[name] if name in os.environ else ""
-
-    def load_gazebo_vars(self):
-        # Updated for Gazebo Harmonic (gz-sim)
-
-        ld_library_path = self._get_env_var("LD_LIBRARY_PATH")
-
-        # If loaded previously
-        gz_resource = self._get_env_var("GZ_SIM_RESOURCE_PATH")
-        gz_plugins = self._get_env_var("GZ_SIM_SYSTEM_PLUGIN_PATH")
-        gz_models = self._get_env_var("SDF_PATH")
-
-        # Gazebo Harmonic uses environment variables for configuration
-        # Note: GAZEBO_MASTER_URI and MODEL_DATABASE_URI are not used in Harmonic
-
-        # Set up Gazebo Harmonic paths
-        # Note: These paths may vary depending on installation
-        os.environ["GZ_SIM_RESOURCE_PATH"] = "/usr/share/gz/gz-sim8" + os.pathsep + gz_resource
-        os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + gz_plugins
-        os.environ["SDF_PATH"] = "/usr/share/gz/gz-sim8/models" + os.pathsep + gz_models
-
-        os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins" + os.pathsep + ld_library_path
-
-        # Now load assets
-
-        models = os.path.join(self.gz_assets, "models")
-        plugins = os.path.join(self.gz_assets, "plugins", "build")
-        self.world_dir = os.path.join(self.gz_assets, "worlds")
-        os.environ["SDF_PATH"] = "{}:{}".format(models, os.environ["SDF_PATH"])
-        os.environ["GZ_SIM_RESOURCE_PATH"] = "{}:{}".format(self.world_dir, os.environ["GZ_SIM_RESOURCE_PATH"])
-        os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] = "{}:{}".format(plugins, os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"])
-
-
-    def _start_and_block_until(self, arguments, output_condition, cwd=None):
-        p = None
-        # TODO whats the default of cwd?
-        if cwd:
-            p = subprocess.Popen(arguments, shell=False, 
-                                         stderr=subprocess.STDOUT, cwd=cwd) 
-        #stdout=subprocess.PIPE,
+    def _append_to_env(self, env_key: str, value: str):
+        env = os.environ.get(env_key, "")
+        if not env:
+            os.environ[env_key] = value
         else:
-            p = subprocess.Popen(arguments, shell=False, 
-                                         stderr=subprocess.STDOUT) 
-        #stdout=subprocess.PIPE,
-        self.pids.append(p.pid)
-        """
-        start_time = time.time()
-        while True:
-            output = p.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                out = str(output.strip())
-                print(out)
-                if output_condition in out:
-                    break
-            if time.time() > start_time + 30:
-                raise Execption("Process start timeout")
-            rc = p.poll()
-        """
+            os.environ[env_key] += os.pathsep + value
 
-    def start_gazebo(self, world, show_gzclient):
-        # Use Gazebo Harmonic command: gz sim
-        # -r flag runs the simulation
-        # -v 4 sets verbosity level
-        # -s runs headless (server only)
-        args = ["gz", "sim"]
+    def _setup_env(self): 
+        models_dir = os.path.join(self.config.aeroloop_path, "models")
+        worlds_dir = os.path.join(self.config.aeroloop_path, "worlds")
+        plugins_dir = os.path.join(self.config.aeroloop_path, "plugins", "build")
 
-        if not show_gzclient:
-            args.append("-s")  # Server only (headless)
+        self._append_to_env("SDF_PATH", models_dir)
+        self._append_to_env("GZ_SIM_RESOURCE_PATH", worlds_dir)
+        self._append_to_env("GZ_SIM_SYSTEM_PLUGIN_PATH", plugins_dir)
 
-        args.extend(["-r", "-v", "4", world])
+    # subprocess management
 
-        p = subprocess.Popen(args, shell=False)
-        self.pids.append(p.pid)
-        time.sleep(10)
+    def _start_subprocess(self, arguments, cwd=None):
+        """spawns subprocess and adds its handle to the list"""
+        proc = subprocess.Popen(
+            arguments,
+            shell=False,
+            stderr=subprocess.STDOUT,
+            cwd=cwd,
+            start_new_session=True
+        )
+        self.process_handles.append(proc)
 
-    def start_betaflight(self):
-        # Need to wait until uart2 is bound so we cna connect our controller to it
-        try:
-            dir_path = os.path.dirname(self.elf)
-            # The bin file is dumped to whatever the current working directory is
-            # If we dont change directories this is problematic if testing multiple
-            # Betaflight builds as they will be overwriten therefore we keep them in 
-            # there corresponding elf directory
-            self._start_and_block_until([self.elf], "bind port 5762 for UART2", cwd=dir_path)
-            time.sleep(5)
-        except Exception as e:
-            logger.error("Timeout starting betaflight, are you sure you have configured your FC to allow communication to UART2?")
-            sys.exit()
+    def _kill_subprocesses(self, sig=None, frame=None):
+        if not self.shutdown_started:
+            self.shutdown_started = True
+            
+            for proc in self.process_handles:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass  # already dead
 
-    def start_video_receiver(self, vidrecv):
-        p = subprocess.Popen([vidrecv], shell=False)
-        self.pids.append(p.pid)
+            deadline = time.time() + 5
+            alive = list(self.process_handles)
+            while alive and time.time() < deadline:
+                alive = [p for p in alive if p.poll() is None]
+                time.sleep(0.1)
 
+            for proc in alive:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # already dead
 
-    def _shutdown(self, a, b):
-        """ Kill the gazebo processes based on the original PID  """
-        for pid in self.pids:
-            p = subprocess.run("kill {}".format(pid), shell=True)
-            logger.info("Killed process {}".format(p))
-        sys.exit()
+            if sig is not None:
+                sys.exit(0)
+            
+    
+    # Betaloop subprocess startup
 
+    def _start_gazebo(self):
+        args_base = ["gz", "sim"]
 
-    def start_transmitter(self, transmitter):
-        p = subprocess.Popen(["node", transmitter], shell=False)
-        self.pids.append(p.pid)
+        # start the server (default behavior)
+        if system_is_macos():
+            # run the gazebo server
+            args_server = args_base + ["-s", "-r", "-v", "4", self.config.world_path]
+            self._start_subprocess(args_server)
 
+            if self.config.show_gazebo:
+                # start viewport
+                args_gui = args_base + ["-g"]
+                self._start_subprocess(args_gui)
+        else:
+            args_gz = args_base.copy()
 
-    def start(self, world=None):
-        if not world:
-            world = self.default_world
-        # Block until connected
-        logger.info("Starting Gazebo world {}.".format(world))
-        self.start_gazebo(world, self.show_gzclient)
+            if not self.config.show_gazebo:
+                args_gz.append("-s")
+
+            args_gz += ["-r", "-v", "4", self.config.world_path]
+            self._start_subprocess(args_gz)
+
         time.sleep(5)
 
-        # Now start Betaflight and connect
-        logger.info("Starting Betaflight SITL at {}.".format(self.elf))
-        self.start_betaflight()
+    def _start_betaflight(self):
+        dir_path = os.path.dirname(self.config.betaflight_elf_path)
+        self._start_subprocess([self.config.betaflight_elf_path], cwd=dir_path)
+        time.sleep(3)
 
-        # Finally we can connect our radio, after FC has started
-        logger.info("Starting the transmitter...")
-        self.start_transmitter(self.transmitter)
+    def _start_msp_virtual_radio(self):
+        self._start_subprocess(["node", self.config.msp_virtual_radio_path])
 
-        # Start up timing doesnt matter, when stream exists it will be displayed
-        if not self.show_gzclient:
-            logger.info("Starting video receiver {}".format(self.vidrecv))
-            self.start_video_receiver(self.vidrecv)
+    def _start_websockify(self):
+        """websockify is used to proxy in between the betaflight configurator
+        websocket and the TCP socket from betaflight SITL"""
+
+        self._start_subprocess(["websockify", "localhost:6761", "localhost:5761"])
+    
+    def _verify_gazebo_plugin(self):
+        # ensure that the aeroloop gazebo plugin is built
+        plugin_dir = os.path.join(self.config.aeroloop_path, "plugins")
+        build_dir = os.path.join(plugin_dir, "build")
+
+        if not os.path.exists(build_dir):
+            betaloop_log("startup failed, aeroloop_gazebo not built")
+            return False
+        
+        
+        return True
+    
+    def _verify_msp_virtual_radio(self):
+        # check that path to mspvirtualradio is correct
+        virtual_radio_path = self.config.msp_virtual_radio_path
+        emu_radio_filename = "emu-dx6-msp.js"
+
+        if not virtual_radio_path.endswith(emu_radio_filename):
+            betaloop_log(f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_radio_filename}")
+            return False
+        
+        return True
+
+    def start(self):
+        if not self._verify_gazebo_plugin():
+            sys.exit(1)
+        # verify virtual radio
+        disable_transmitter = self.config.disable_msp_virtual_radio or \
+                            self.config.msp_virtual_radio_path is None
+        if not disable_transmitter:
+            if not self._verify_msp_virtual_radio():
+                sys.exit(1)
+
+        self._setup_env()
+               
+        try:
+            # Block until connected
+            betaloop_log("starting gazebo")
+            self._start_gazebo()
+
+            # start websockify
+            betaloop_log("starting websockify proxy")
+            self._start_websockify()
+
+            # starting betaflight SITL
+            betaloop_log(f"starting Betaflight SITL at {self.config.betaflight_elf_path}")
+            self._start_betaflight()
+
+            if not disable_transmitter:
+                # startup MSP virtual radio
+                betaloop_log("starting msp_virtual_radio")
+                self._start_msp_virtual_radio()
+        except Exception as e:
+            betaloop_log(f"startup failed with {e}")
+            self._kill_subprocesses()
+            sys.exit(1)
 
         # Keep it up so we can kill with ctrl + c
         while True:
             time.sleep(1)
 
-    def list_worlds(self):
-        i = 0 
-        world_files = [f for f in os.listdir(self.world_dir) if f.endswith(".world")]
-        if len(world_files) == 0:
-            print("Could not find any world files, have you configured config.txt to point to the Aeroloop Gazebo?")
-            return
+def start_betaloop():
+    betaloop_dir = os.path.dirname(os.path.abspath(__file__))
+    config_file_path = os.path.join(betaloop_dir, DEFAULT_CONFIG_FILE_NAME)
 
-        # Got some, display
-        for f in world_files:
-            print ("{}. {}".format(i+1, f))
-            i += 1
+    config_parser = BetaloopConfigParser(config_file_path)
+    result = config_parser.parse()
 
-        print("")
-        valid = False
-        while not valid:
-            selection = input("To launch a world, please enter the corresponding world number or press enter to cancel:")
-            if selection == "":
-                break
-            try:
-                n = int(selection)
-                if n > 0 and n <= len(world_files):
-                    world_file_abs = os.path.join(self.world_dir, world_files[n-1])
-                    self.start(world = world_file_abs)
-                else:
-                    print ("Your input {} is invalid".format(n))
-            except ValueError:
-                print ("Please enter an integer between 1 and {}".format(len(world_files)))
+    if result is None:
+        betaloop_log("config failed, one or more required fields missing or invalid")
+        sys.exit(1)
 
+    betaloop_log("config success, starting")
 
+    betaloop_config = result
+    betaloop = Betaloop(betaloop_config)
 
-
+    betaloop.start()
 
 if __name__ == "__main__":
-    if not os.path.exists("config.txt"):
-        logger.warn("Could not find configuration file config.txt, fallingback to command line arguments")
-
-    # Load config
-    config = configparser.ConfigParser()
-    config.read("config.txt")
-    gazebo_assets_home = config["Betaloop"]["AeroloopGazeboHome"]
-    world =  os.path.join(gazebo_assets_home, "worlds", config["Betaloop"]["World"])
-    elf = config["Betaloop"]["BetaflightElf"]
-    msp_virtual_radio_home = config["Betaloop"]["MspVirtualRadioHome"]
-    transmitter = os.path.join(msp_virtual_radio_home, "emu-dx6-msp.js")
-
-    vidrecv = config["Betaloop"]["Vidrecv"]
-
-    parser = argparse.ArgumentParser("Betaloop")
-    parser.add_argument('--gazebo-assets', type=str, default=gazebo_assets_home)
-    parser.add_argument('--world', type=str, default=world)
-    parser.add_argument('--elf', type=str, default=elf)
-    parser.add_argument('--transmitter', type=str, default=transmitter)
-    parser.add_argument('--vidrecv', type=str, default=vidrecv)
-    parser.add_argument('--gazebo', help="Start in Gazebo, not FPV mode", action="store_true")
-
-    parser.add_argument('-l', '--list', help="List available worlds", action="store_true")
-
-    args = parser.parse_args()
-
-    #Make sure they are set
-    """
-    if not world:
-        logger.error("No world specified, please add to config.txt or command line argument")
-        sys.exit()
-    if not elf:
-        logger.error("No location to Betaflight Elf file specified, please add to config.txt or command line argument")
-        sys.exit()
-    """
-
-    betaloop = Betaloop(args.gazebo_assets, args.world, args.elf, args.transmitter, args.vidrecv, args.gazebo)
-    if args.list:
-        betaloop.list_worlds()
-    else:
-        betaloop.start()
-
-
+    start_betaloop()
