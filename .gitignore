@@ -1,3 +1,16 @@
-*.bin
-*.log
+# hide config file
 config.txt
+
+# pycache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+
+# VSCode
+.vscode/
+
+# Logs
+*.log
