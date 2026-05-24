@@ -7,6 +7,10 @@ Betaloop is a simulation launcher that creates an environment for evaluation of 
 The simulated environment runs in Gazebo Harmonic and interfaces with Betaflight SITL through the aeroloop gazebo plugin. Additionally this launcher provides the ability to
 use an RC transmitter with a USB Joystick to control the simulated drone through an additional plugin.
 
+## Supported Platforms
+
+This launcher has native support and has been tested with Ubuntu Linux and MacOS. Windows is only supported through WSL2. 
+
 ## Prerequisites
 
 * git

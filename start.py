@@ -47,9 +47,9 @@ class ConfigField:
         self.cli_key = cli_key
 
     def validate(self, value) -> bool: raise NotImplementedError()
-    def cli_value_invalid_error(self, value): raise NotImplementedError()
-    def file_required_value_missing_error(self, filename: str): raise NotImplementedError()
-    def file_value_invalid_error(self, value): raise NotImplementedError()
+    def cli_value_invalid_err(self, value): raise NotImplementedError()
+    def file_required_value_missing_err(self, filename: str): raise NotImplementedError()
+    def file_value_invalid_err(self, value): raise NotImplementedError()
     def get_from_section(self, section: configparser.SectionProxy): raise NotImplementedError()
     def register_cli_argument(self, argparser: argparse.ArgumentParser): raise NotImplementedError()
 
@@ -66,17 +66,17 @@ class PathConfigField(ConfigField):
             return False
         return os.path.exists(value)
     
-    def cli_value_invalid_error(self, value):
+    def cli_value_invalid_err(self, value):
         err = f"provided value for {self.cli_key} invalid\n" \
               f"-> path: {value} does not exist"
         return err
     
-    def file_required_value_missing_error(self, filename: str):
+    def file_required_value_missing_err(self, filename: str):
         err = f"required field {self.file_key} missing from ({filename})\n" \
               f"-> please add the missing field as {self.file_key}=/path/to/{self.name}"
         return err
     
-    def file_value_invalid_error(self, value):
+    def file_value_invalid_err(self, value):
         err = f"provided value for {self.file_key} invalid\n" \
               f"-> path {value} does not exist"
         return err
@@ -96,17 +96,17 @@ class BoolConfigField(ConfigField):
             return False
         return isinstance(value, bool)
     
-    def cli_value_invalid_error(self, value):
+    def cli_value_invalid_err(self, value):
         err = f"provided value for {self.cli_key} invalid, value must be a boolean"
         return err
     
-    def file_required_value_missing_error(self, filename: str):
+    def file_required_value_missing_err(self, filename: str):
         err = f"required field {self.file_key} missing from {filename}\n" \
               f"-> please add the missing field as:\n" \
               f"   {self.file_key}=True or {self.file_key}=False depending on desired behavior"
         return err
     
-    def file_value_invalid_error(self, value):
+    def file_value_invalid_err(self, value):
         err = f"provided value for {self.file_key} invalid\n" \
                 "-> value must be a boolean (true or false)"
         return err
@@ -191,7 +191,9 @@ class BetaloopConfigParser:
                 if field.required:
                     if value is None:
                         # log error that the value could not be found in the file
-                        err_msg = field.file_required_value_missing_error(self._config_file_name)
+                        err_msg = field.file_required_value_missing_err(
+                            filename=self._config_file_name)
+                        
                         betaloop_log(err_msg)
                         return None
                 
@@ -211,9 +213,9 @@ class BetaloopConfigParser:
             if value is not None:
                 if not field.validate(value):
                     if value_from_cli:
-                        betaloop_log(field.cli_value_invalid_error(value))
+                        betaloop_log(field.cli_value_invalid_err(value))
                     else:
-                        betaloop_log(field.file_value_invalid_error(value))
+                        betaloop_log(field.file_value_invalid_err(value))
                     return None
             
             config_values[field.name] = value
@@ -393,6 +395,8 @@ class Betaloop:
 
         # Keep it up so we can kill with ctrl + c
         while True:
+            # can use this to do update steps with the plugins if needed
+            
             time.sleep(1)
 
 def start_betaloop():
