@@ -196,7 +196,14 @@ class BetaloopConfigParser:
             
             if field.name == "world_file":
                 if value is not None and not os.path.isabs(value):
-                    value = os.path.join(config_values["aeroloop_path"], "worlds", value)
+                    aeroloop_path = config_values["aeroloop_path"]
+
+                    # check for worlds using the legacy path initially
+                    world_path = os.path.join(aeroloop_path, "worlds")
+                    if not os.path.exists(world_path):
+                        world_path = os.path.join(aeroloop_path, "assets", "worlds")
+                    
+                    value = os.path.join(world_path, value)
             
             if value is not None:
                 if not field.validate(value):
