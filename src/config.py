@@ -21,6 +21,7 @@ class BetaloopConfig:
     # launch settings
     show_gazebo: typing.Optional[bool]
     disable_msp_virtual_radio: typing.Optional[bool]
+    disable_websockify: typing.Optional[bool]
 
 class ConfigField:
     """Configuration Field to hold information regarding each of the simulators
@@ -129,7 +130,8 @@ class BetaloopConfigParser:
 
             # optional boolean fields
             BoolConfigField("show_gazebo", False, "ShowGazebo", "gazebo"),
-            BoolConfigField("disable_transmitter", False, "DisableTransmitter", "disable_transmitter")
+            BoolConfigField("disable_transmitter", False, "DisableTransmitter", "disable_transmitter"),
+            BoolConfigField("disable_websockify", False, "DisableWebsockify", "disable_websockify")
         ]
 
         self._config_file_name = os.path.basename(fpath)
@@ -193,7 +195,8 @@ class BetaloopConfigParser:
             # note: don't want to break existing configs so this functionality is here
             
             if field.name == "world_file":
-                value = os.path.join(config_values["aeroloop_path"], "worlds", value)
+                if value is not None and not os.path.isabs(value):
+                    value = os.path.join(config_values["aeroloop_path"], "worlds", value)
             
             if value is not None:
                 if not field.validate(value):
@@ -211,7 +214,8 @@ class BetaloopConfigParser:
             config_values["betaflight_elf"],
             config_values["transmitter"],
             config_values["show_gazebo"],
-            config_values["disable_transmitter"]
+            config_values["disable_transmitter"],
+            config_values["disable_websockify"]
         )
                     
         return betaloop_config, ""

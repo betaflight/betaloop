@@ -74,7 +74,6 @@ class Betaloop:
             if sig is not None:
                 sys.exit(0)
             
-    
     # Betaloop subprocess startup
 
     def _start_gazebo(self):
@@ -124,16 +123,18 @@ class Betaloop:
             betaloop_log("startup failed, aeroloop_gazebo not built")
             return False
         
-        
+
         return True
     
     def _verify_msp_virtual_radio(self):
         # check that path to mspvirtualradio is correct
         virtual_radio_path = self.config.msp_virtual_radio_path
-        emu_radio_filename = "emu-dx6-msp.js"
+        emu_filename = "emu-dx6-msp.js"
 
-        if not virtual_radio_path.endswith(emu_radio_filename):
-            betaloop_log(f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_radio_filename}")
+        if not virtual_radio_path.endswith(emu_filename):
+            betaloop_log(
+                f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_filename}"
+            )
             return False
         
         return True
@@ -156,8 +157,9 @@ class Betaloop:
             self._start_gazebo()
 
             # start websockify
-            betaloop_log("starting websockify proxy")
-            self._start_websockify()
+            if not self.config.disable_websockify:
+                betaloop_log("starting websockify proxy")
+                self._start_websockify()
 
             # starting betaflight SITL
             betaloop_log(f"starting Betaflight SITL at {self.config.betaflight_elf_path}")

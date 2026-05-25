@@ -68,3 +68,7 @@ config file should follow the format provided in `config.template.txt` and be na
    * Option to disable transmitter input
       * CLI : `--disable-transmitter`
       * Config : `DisableTransmitter=true` or `DisableTransmitter=false`
+
+   * Option to disable websockify
+      * CLI: `--disable-websockify`
+      * Config : `DisableWebsockify=true` or `DisableWebsockify=false`
