@@ -114,7 +114,11 @@ class Betaloop:
         time.sleep(3)
 
     def _start_msp_virtual_radio(self):
-        self._start_subprocess(["node", self.config.msp_virtual_radio_path])
+        path = self.config.msp_virtual_radio_path
+        if path is None:
+            betaloop_log("msp_virtual_radio path missing; skipping startup")
+            return
+        self._start_subprocess(["node", path])
 
     def _start_websockify(self):
         """websockify is used to proxy in between the betaflight configurator
@@ -144,7 +148,7 @@ class Betaloop:
         virtual_radio_path = self.config.msp_virtual_radio_path
         emu_filename = "emu-dx6-msp.js"
 
-        if not virtual_radio_path.endswith(emu_filename):
+        if not virtual_radio_path or not virtual_radio_path.endswith(emu_filename):
             betaloop_log(
                 f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_filename}"
             )

@@ -17,7 +17,7 @@ This launcher has native support and has been tested with Ubuntu Linux and MacOS
 * python 3.7+
 * Betaflight cloned locally + required build toolchain
 * websockify (install `pip install websockify`)
-* [aeroloop_gazebo]((https://github.com/betaflight/aeroloop_gazebo/tree/gz)) cloned locally and built.
+* [aeroloop_gazebo](https://github.com/betaflight/aeroloop_gazebo/tree/gz) cloned locally and built.
 
 ## Setup Guide
 
@@ -29,7 +29,7 @@ This launcher has native support and has been tested with Ubuntu Linux and MacOS
 * MSP Virtual Radio (https://github.com/Aeroloop/msp_virtualradio)
 
    MSP Virtual Radio can be used to provide joystick input to the simulated drone.
-   Compatibility with it has been maintained in the current version of Betaloop to maintain parity with existing setups. Given that active development has seemed to cease on the project a plugin `betaloop_joystick` is planned to succeed it
+   Compatibility with it has been maintained in the current version of Betaloop to maintain parity with existing setups. Given that active development has seemed to cease on the project, a plugin `betaloop_joystick` is planned to succeed it.
 
 ## Usage
 

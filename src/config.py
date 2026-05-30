@@ -16,7 +16,7 @@ class BetaloopConfig:
     betaflight_elf_path: str
 
     # auxiliary paths
-    msp_virtual_radio_path: str
+    msp_virtual_radio_path: typing.Optional[str]
     
     # launch settings
     show_gazebo: typing.Optional[bool]
