@@ -200,6 +200,7 @@ class BetaloopConfigParser:
 
                     # check for worlds using the legacy path initially
                     world_path = os.path.join(aeroloop_path, "worlds")
+                    
                     if not os.path.exists(world_path):
                         world_path = os.path.join(aeroloop_path, "assets", "worlds")
                     

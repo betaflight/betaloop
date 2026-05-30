@@ -22,18 +22,26 @@ class Betaloop:
         self.process_handles: typing.List[subprocess.Popen] = []
         self.shutdown_started = False
 
+        # detect legacy aeroloop gazebo version
+        self.aeroloop_legacy = False
+        if not os.path.exists(os.path.join(config.aeroloop_path, "build")):
+            self.aeroloop_legacy = True
+
         atexit.register(self._kill_subprocesses)
         signal.signal(signal.SIGTERM, self._kill_subprocesses)
         signal.signal(signal.SIGINT, self._kill_subprocesses)
 
-    def _setup_env(self): 
-        models_dir = os.path.join(self.config.aeroloop_path, "models")
-        worlds_dir = os.path.join(self.config.aeroloop_path, "worlds")
-        plugins_dir = os.path.join(self.config.aeroloop_path, "plugins", "build")
-
-        append_to_env("SDF_PATH", models_dir)
-        append_to_env("GZ_SIM_RESOURCE_PATH", worlds_dir)
-        append_to_env("GZ_SIM_SYSTEM_PLUGIN_PATH", plugins_dir)
+    def _setup_env(self):
+        if self.aeroloop_legacy:
+            assets_path = os.path.join(self.config.aeroloop_path)
+            lib_path = os.path.join(self.config.aeroloop_path, "plugins", "build")
+        else:
+            assets_path = os.path.join(self.config.aeroloop_path, "assets")
+            lib_path = os.path.join(self.config.aeroloop_path, "build")
+        
+        append_to_env("SDF_PATH", os.path.join(assets_path, "models"))
+        append_to_env("GZ_SIM_RESOURCE_PATH", os.path.join(assets_path, "worlds"))
+        append_to_env("GZ_SIM_SYSTEM_PLUGIN_PATH", lib_path)
 
     # subprocess management
 
@@ -116,14 +124,19 @@ class Betaloop:
     
     def _verify_gazebo_plugin(self):
         # ensure that the aeroloop gazebo plugin is built
-        plugin_dir = os.path.join(self.config.aeroloop_path, "plugins")
-        build_dir = os.path.join(plugin_dir, "build")
+        if self.aeroloop_legacy:
+            plugin_dir = os.path.join(self.config.aeroloop_path, "plugins")
+            build_dir = os.path.join(plugin_dir, "build")
 
-        if not os.path.exists(build_dir):
-            betaloop_log("startup failed, aeroloop_gazebo not built")
-            return False
+            if not os.path.exists(build_dir):
+                betaloop_log("startup failed, aeroloop_gazebo not built")
+                return False
+        else:
+            build_dir = os.path.join(self.config.aeroloop_path, "build")
+            if not os.path.exists(build_dir):
+                betaloop_log("startup failed, aeroloop gazebo plugin not built")
+                return False
         
-
         return True
     
     def _verify_msp_virtual_radio(self):

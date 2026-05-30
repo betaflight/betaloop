@@ -15,16 +15,14 @@ This launcher has native support and has been tested with Ubuntu Linux and MacOS
 
 * git
 * python 3.7+
-* CMake 3.10.2+
-* Gazebo Harmonic
 * Betaflight cloned locally + required build toolchain
 * websockify (install `pip install websockify`)
-* Aeroloop cloned locally (https://github.com/betaflight/aeroloop_gazebo/tree/gz)
+* [aeroloop_gazebo]((https://github.com/betaflight/aeroloop_gazebo/tree/gz)) cloned locally and built.
 
 ## Setup Guide
 
 * build Betaflight SITL target
-* build Aeroloop using `aeroloop_gazebo/build_plugin.sh`
+* build the aeroloop_gazebo plugin
 
 ## Optional Setup
 
@@ -72,3 +70,7 @@ config file should follow the format provided in `config.template.txt` and be na
    * Option to disable websockify
       * CLI: `--disable-websockify`
       * Config : `DisableWebsockify=true` or `DisableWebsockify=false`
+
+## Acknowledgements
+
+This repository is derived from the original [Betaloop](https://github.com/Aeroloop/betaloop) and builds on the work of [wil3](https://github.com/wil3). Thanks to Will for his work in initially creating this tool.
