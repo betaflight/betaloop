@@ -14,6 +14,16 @@ from .config import BetaloopConfig, BetaloopConfigParser
 def betaloop_log(msg: str):
     print(f"[BETALOOP] {msg}")
 
+def is_aeroloop_legacy(path: str):
+    """check if aeroloop is on the new version or is a legacy build"""
+
+    # expected build path of the current version of aeroloop
+    build_path = os.path.join(path, "build")
+    if not os.path.exists(build_path):
+        return True
+    
+    return False
+
 class Betaloop:
     """Core Betaloop launcher class which starts the simulated environment"""
 
@@ -23,10 +33,12 @@ class Betaloop:
         self.shutdown_started = False
 
         # detect legacy aeroloop gazebo version
-        self.aeroloop_legacy = False
-        if not os.path.exists(os.path.join(config.aeroloop_path, "build")):
-            self.aeroloop_legacy = True
+        self.aeroloop_legacy = is_aeroloop_legacy(config.aeroloop_path)
 
+        # setup shutdown procedure
+        self._register_shutdown_handlers()
+
+    def _register_shutdown_handlers(self):
         atexit.register(self._kill_subprocesses)
         signal.signal(signal.SIGTERM, self._kill_subprocesses)
         signal.signal(signal.SIGINT, self._kill_subprocesses)
@@ -87,10 +99,14 @@ class Betaloop:
     def _start_gazebo(self):
         args_base = ["gz", "sim"]
 
+        if self.config.verbose:
+            # enables verbose (debug level) logging from gazebo
+            args_base += ["-v", "4"]
+
         # start the server (default behavior)
         if system_is_macos():
             # run the gazebo server
-            args_server = args_base + ["-s", "-r", "-v", "4", self.config.world_path]
+            args_server = args_base + ["-s", "-r", self.config.world_path]
             self._start_subprocess(args_server)
 
             if self.config.show_gazebo:
@@ -103,22 +119,27 @@ class Betaloop:
             if not self.config.show_gazebo:
                 args_gz.append("-s")
 
-            args_gz += ["-r", "-v", "4", self.config.world_path]
+            args_gz += ["-r", self.config.world_path]
             self._start_subprocess(args_gz)
 
         time.sleep(5)
 
     def _start_betaflight(self):
+        """starts the betaflight SITL executable"""
+
         dir_path = os.path.dirname(self.config.betaflight_elf_path)
         self._start_subprocess([self.config.betaflight_elf_path], cwd=dir_path)
+
         time.sleep(3)
 
     def _start_msp_virtual_radio(self):
+        """starts the MSP virtual radio"""
+
         path = self.config.msp_virtual_radio_path
         if path is None:
             betaloop_log("msp_virtual_radio path missing; skipping startup")
-            return
-        self._start_subprocess(["node", path])
+        else:
+            self._start_subprocess(["node", path])
 
     def _start_websockify(self):
         """websockify is used to proxy in between the betaflight configurator
@@ -127,28 +148,26 @@ class Betaloop:
         self._start_subprocess(["websockify", "localhost:6761", "localhost:5761"])
     
     def _verify_gazebo_plugin(self):
-        # ensure that the aeroloop gazebo plugin is built
+        """ensure the BetaflightPlugin is built"""
+
         if self.aeroloop_legacy:
             plugin_dir = os.path.join(self.config.aeroloop_path, "plugins")
             build_dir = os.path.join(plugin_dir, "build")
-
-            if not os.path.exists(build_dir):
-                betaloop_log("startup failed, aeroloop_gazebo not built")
-                return False
         else:
             build_dir = os.path.join(self.config.aeroloop_path, "build")
-            if not os.path.exists(build_dir):
-                betaloop_log("startup failed, aeroloop gazebo plugin not built")
-                return False
+
+        if not os.path.exists(build_dir):
+            betaloop_log("startup failed, aeroloop_gazebo not built")
+            return False
         
         return True
     
     def _verify_msp_virtual_radio(self):
         # check that path to mspvirtualradio is correct
-        virtual_radio_path = self.config.msp_virtual_radio_path
+        path = self.config.msp_virtual_radio_path
         emu_filename = "emu-dx6-msp.js"
 
-        if not virtual_radio_path or not virtual_radio_path.endswith(emu_filename):
+        if not path or not path.endswith(emu_filename):
             betaloop_log(
                 f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_filename}"
             )
@@ -159,9 +178,11 @@ class Betaloop:
     def start(self):
         if not self._verify_gazebo_plugin():
             sys.exit(1)
+
         # verify virtual radio
         disable_transmitter = self.config.disable_msp_virtual_radio or \
                             self.config.msp_virtual_radio_path is None
+
         if not disable_transmitter:
             if not self._verify_msp_virtual_radio():
                 sys.exit(1)

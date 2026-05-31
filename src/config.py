@@ -22,8 +22,9 @@ class BetaloopConfig:
     show_gazebo: typing.Optional[bool]
     disable_msp_virtual_radio: typing.Optional[bool]
     disable_websockify: typing.Optional[bool]
+    verbose: typing.Optional[bool]
 
-class ConfigField:
+class _ConfigField:
     """Configuration Field to hold information regarding each of the simulators
        arguments. Also used to enforce required arguments that are non-negotiable
        paths / values that are needed to setup the simulation environment"""
@@ -34,17 +35,28 @@ class ConfigField:
         self.file_key = file_key
         self.cli_key = cli_key
 
-    def validate(self, value) -> bool: raise NotImplementedError()
-    def cli_value_invalid_err(self, value): raise NotImplementedError()
-    def file_required_value_missing_err(self, filename: str): raise NotImplementedError()
-    def file_value_invalid_err(self, value): raise NotImplementedError()
-    def get_from_section(self, section: configparser.SectionProxy): raise NotImplementedError()
-    def register_cli_argument(self, argparser: argparse.ArgumentParser): raise NotImplementedError()
+    def validate(self, value) -> bool: 
+        raise NotImplementedError()
+    
+    def cli_value_invalid_err(self, value): 
+        raise NotImplementedError()
+    
+    def file_required_value_missing_err(self, filename: str): 
+        raise NotImplementedError()
+    
+    def file_value_invalid_err(self, value): 
+        raise NotImplementedError()
+    
+    def get_from_section(self, section: configparser.SectionProxy):
+        raise NotImplementedError()
+    
+    def register_cli_argument(self, argparser: argparse.ArgumentParser): 
+        raise NotImplementedError()
 
     def _get_cli_cmd_str(self) -> str:
         return "--" + self.cli_key.replace("_", "-")
 
-class PathConfigField(ConfigField):
+class PathConfigField(_ConfigField):
     """Configuration Field for defining a path to some resource"""
 
     def validate(self, value) -> bool:
@@ -75,7 +87,7 @@ class PathConfigField(ConfigField):
     def register_cli_argument(self, argparser: argparse.ArgumentParser):
         argparser.add_argument(self._get_cli_cmd_str(), type=str)
         
-class BoolConfigField(ConfigField):
+class BoolConfigField(_ConfigField):
     """Configuation Field for enabling disabling specific behaviors
         i.e. if Gazebo UI runs headless"""
     
@@ -119,7 +131,7 @@ class BetaloopConfigParser:
     def __init__(self, fpath: str):
         # store list of configuration fields
 
-        self._fields: typing.List[ConfigField]  = [
+        self._fields: typing.List[_ConfigField]  = [
             # required fields
             PathConfigField("aeroloop_path", True, "AeroloopGazeboHome", "gazebo_assets"),
             PathConfigField("world_file", True, "World", "world"),
@@ -131,17 +143,22 @@ class BetaloopConfigParser:
             # optional boolean fields
             BoolConfigField("show_gazebo", False, "ShowGazebo", "gazebo"),
             BoolConfigField("disable_transmitter", False, "DisableTransmitter", "disable_transmitter"),
-            BoolConfigField("disable_websockify", False, "DisableWebsockify", "disable_websockify")
+            BoolConfigField("disable_websockify", False, "DisableWebsockify", "disable_websockify"),
+            BoolConfigField("verbose", False, "Verbose", "verbose"),
         ]
 
+        # setup file parser
+        
         self._config_file_name = os.path.basename(fpath)
         self._config_file_exists = os.path.exists(fpath)
 
         if self._config_file_exists:
             self._config_file_parser = configparser.ConfigParser()
             self._config_file_parser.read(fpath)
+        else:
+            self._config_file_parser = None
 
-        # setup CLI 
+        # setup CLI parser
 
         self._config_cli_parser = argparse.ArgumentParser("Betaloop")
 
@@ -217,13 +234,19 @@ class BetaloopConfigParser:
             config_values[field.name] = value
 
         betaloop_config = BetaloopConfig(
-            config_values["aeroloop_path"],
-            config_values["world_file"],
-            config_values["betaflight_elf"],
-            config_values["transmitter"],
-            config_values["show_gazebo"],
-            config_values["disable_transmitter"],
-            config_values["disable_websockify"]
+            # required
+            aeroloop_path=config_values["aeroloop_path"],
+            world_path=config_values["world_file"],
+            betaflight_elf_path=config_values["betaflight_elf"],
+
+            # optional paths
+            msp_virtual_radio_path=config_values["transmitter"],
+
+            # optional booleans
+            show_gazebo=config_values["show_gazebo"],
+            disable_msp_virtual_radio=config_values["disable_transmitter"],
+            disable_websockify=config_values["disable_websockify"],
+            verbose=config_values["verbose"]
         )
                     
         return betaloop_config, ""
