@@ -56,7 +56,7 @@ class _ConfigField:
     def _get_cli_cmd_str(self) -> str:
         return "--" + self.cli_key.replace("_", "-")
 
-class PathConfigField(_ConfigField):
+class FilePathConfigField(_ConfigField):
     """Configuration Field for defining a path to some resource"""
 
     def validate(self, value) -> bool:
@@ -64,11 +64,11 @@ class PathConfigField(_ConfigField):
             return False
         if not isinstance(value, str):
             return False
-        return os.path.exists(value)
+        return os.path.isfile(value)
     
     def cli_value_invalid_err(self, value):
         err = f"provided value for {self.cli_key} invalid\n" \
-              f"-> path: {value} does not exist"
+              f"-> file: {value} does not exist"
         return err
     
     def file_required_value_missing_err(self, filename: str):
@@ -78,7 +78,7 @@ class PathConfigField(_ConfigField):
     
     def file_value_invalid_err(self, value):
         err = f"provided value for {self.file_key} invalid\n" \
-              f"-> path {value} does not exist"
+              f"-> file {value} does not exist"
         return err
     
     def get_from_section(self, section: configparser.SectionProxy):
@@ -86,7 +86,36 @@ class PathConfigField(_ConfigField):
 
     def register_cli_argument(self, argparser: argparse.ArgumentParser):
         argparser.add_argument(self._get_cli_cmd_str(), type=str)
-        
+
+class DirectoryPathConfigField(_ConfigField):
+    def validate(self, value) -> bool:
+        if value is None:
+            return False
+        if not isinstance(value, str):
+            return False
+        return os.path.isdir(value)
+
+    def cli_value_invalid_err(self, value):
+        err = f"provided valuef or {self.cli_key} invalid\n" \
+              f"-> directory: {value} does not exist"
+        return err
+
+    def file_required_value_missing_err(self, filename: str):
+        err = f"required field {self.file_key} missing from ({filename})\n" \
+              f"-> please add the missing field as {self.file_key}=/path/to/{self.name}"
+        return err
+
+    def file_value_invalid_err(self, value):
+        err = f"provided value for {self.file_key} invalid\n" \
+              f"-> directory {value} does not exist"
+        return err
+    
+    def get_from_section(self, section: configparser.SectionProxy):
+        return section.get(self.file_key)
+
+    def register_cli_argument(self, argparser: argparse.ArgumentParser):
+        argparser.add_argument(self._get_cli_cmd_str(), type=str)
+
 class BoolConfigField(_ConfigField):
     """Configuation Field for enabling disabling specific behaviors
         i.e. if Gazebo UI runs headless"""
@@ -106,18 +135,13 @@ class BoolConfigField(_ConfigField):
               f"   {self.file_key}=True or {self.file_key}=False depending on desired behavior"
         return err
     
-    def file_value_invalid_err(self, value):
+    def file_value_invalid_err(self, value=None):
         err = f"provided value for {self.file_key} invalid\n" \
                 "-> value must be a boolean (true or false)"
         return err
     
     def get_from_section(self, section: configparser.SectionProxy):
-        try:
-            return section.getboolean(self.file_key)
-        except ValueError as e:
-            # getboolean may return a value error if the provided value is not
-            # within the list of acceptable "boolean" values
-            return None
+        return section.getboolean(self.file_key)
     
     def register_cli_argument(self, argparser: argparse.ArgumentParser):
         argparser.add_argument(self._get_cli_cmd_str(), action="store_true", default=None)
@@ -133,12 +157,12 @@ class BetaloopConfigParser:
 
         self._fields: typing.List[_ConfigField]  = [
             # required fields
-            PathConfigField("aeroloop_path", True, "AeroloopGazeboHome", "gazebo_assets"),
-            PathConfigField("world_file", True, "World", "world"),
-            PathConfigField("betaflight_elf", True, "BetaflightElf", "elf"),
+            DirectoryPathConfigField("aeroloop_path", True, "AeroloopGazeboHome", "gazebo_assets"),
+            FilePathConfigField("world_file", True, "World", "world"),
+            FilePathConfigField("betaflight_elf", True, "BetaflightElf", "elf"),
 
             # optional path fields
-            PathConfigField("transmitter", False, "MspVirtualRadioHome", "transmitter"),
+            FilePathConfigField("transmitter", False, "MspVirtualRadioHome", "transmitter"),
 
             # optional boolean fields
             BoolConfigField("show_gazebo", False, "ShowGazebo", "gazebo"),
@@ -183,6 +207,7 @@ class BetaloopConfigParser:
 
         # config validation
         for field in self._fields:
+
             value_from_cli = False
             value = getattr(self._config_cli_args, field.cli_key)
 
@@ -191,8 +216,15 @@ class BetaloopConfigParser:
                 value_from_cli = True
 
             elif config_section is not None:
+
                 # try to source value from config file
-                value = field.get_from_section(config_section)
+                try:
+                    value = field.get_from_section(config_section)
+                except ValueError:
+                    # only way this raises is if its a boolean
+                    err_msg = field.file_value_invalid_err()
+                    return None, err_msg
+                
                 if field.required:
                     if value is None:
                         # log error that the value could not be found in the file
@@ -250,3 +282,4 @@ class BetaloopConfigParser:
         )
                     
         return betaloop_config, ""
+    

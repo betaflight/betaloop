@@ -9,7 +9,7 @@ use an RC transmitter with a USB Joystick to control the simulated drone through
 
 ## Supported Platforms
 
-This launcher has native support and has been tested with Ubuntu Linux and MacOS. Windows is only supported through WSL2. 
+This launcher has native support and has been tested with Ubuntu Linux and macOS. Windows is only supported through WSL2. 
 
 ## Prerequisites
 

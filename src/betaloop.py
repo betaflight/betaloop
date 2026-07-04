@@ -40,6 +40,7 @@ class Betaloop:
 
     def _register_shutdown_handlers(self):
         atexit.register(self._kill_subprocesses)
+        
         signal.signal(signal.SIGTERM, self._kill_subprocesses)
         signal.signal(signal.SIGINT, self._kill_subprocesses)
 
@@ -166,7 +167,7 @@ class Betaloop:
         # check that path to mspvirtualradio is correct
         path = self.config.msp_virtual_radio_path
         emu_filename = "emu-dx6-msp.js"
-
+        
         if not path or not path.endswith(emu_filename):
             betaloop_log(
                 f"startup failed, ensure path provided for MspVirtualRadioHome leads to {emu_filename}"
