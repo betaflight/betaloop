@@ -96,7 +96,7 @@ class DirectoryPathConfigField(_ConfigField):
         return os.path.isdir(value)
 
     def cli_value_invalid_err(self, value):
-        err = f"provided valuef or {self.cli_key} invalid\n" \
+        err = f"provided value for {self.cli_key} invalid\n" \
               f"-> directory: {value} does not exist"
         return err
 
